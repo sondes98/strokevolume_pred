@@ -2,24 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import axios from "axios";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  Legend, ResponsiveContainer,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  Legend,
 } from "recharts";
-import {
-  MoonIcon, SunIcon, PlayIcon, StopIcon,
-} from "@heroicons/react/24/solid";
-import LVADImage from './assets/corwave-lvad-insertion.png';
 
-export default function App() {
+function App() {
   const [latestPrediction, setLatestPrediction] = useState(null);
   const [waveformData, setWaveformData] = useState([]);
   const [labelType, setLabelType] = useState("activity");
   const [labelValue, setLabelValue] = useState("");
   const [connected, setConnected] = useState(false);
   const [simulating, setSimulating] = useState(false);
-  const [darkMode, setDarkMode] = useState(true);
-  const [showTable, setShowTable] = useState(false);
-
   const stepRef = useRef(0);
   const socketRef = useRef(null);
 
@@ -28,10 +26,15 @@ export default function App() {
   const labelOptions = labelType === "activity" ? activityOptions : emotionOptions;
 
   const signals = [
-    "Solar8000/HR", "Solar8000/RR_CO2", "Solar8000/NIBP_MBP",
-    "Solar8000/PLETH_SPO2", "Solar8000/PLETH_HR", "EV1000/ART_MBP",
-    "stroke_volume"
+    "Solar8000/HR",
+    "Solar8000/RR_CO2",
+    "Solar8000/NIBP_MBP",
+    "Solar8000/PLETH_SPO2",
+    "Solar8000/PLETH_HR",
+    "EV1000/ART_MBP",
+    "stroke_volume",
   ];
+
   const signalNames = {
     "Solar8000/HR": "Heart Rate",
     "Solar8000/RR_CO2": "CO₂ Resp. Rate",
@@ -41,42 +44,52 @@ export default function App() {
     "EV1000/ART_MBP": "Art. Mean BP",
     "stroke_volume": "Stroke Volume",
   };
+
   const signalColors = [
-    "#3b82f6", "#10b981", "#f59e0b", "#ef4444",
-    "#8b5cf6", "#06b6d4", "#ec4899"
+    "#007bff", "#28a745", "#ffc107", "#dc3545",
+    "#6f42c1", "#17a2b8", "#ff69b4" // Pink for Stroke Volume
   ];
 
-  // WebSocket setup
   useEffect(() => {
     socketRef.current = io("http://localhost:5050", {
       transports: ["websocket"],
       reconnectionAttempts: 5,
-      timeout: 10000
+      timeout: 10000,
     });
 
     const socket = socketRef.current;
 
     socket.on("connect", () => setConnected(true));
     socket.on("disconnect", () => setConnected(false));
+    socket.on("connect_error", (err) =>
+      console.error("🔌 WebSocket error:", err.message)
+    );
 
-    socket.on("new_prediction", ({ value }) => {
-      setLatestPrediction(value);
+    socket.on("new_prediction", (data) => {
+      setLatestPrediction(data.value);
+    
       stepRef.current = +(stepRef.current + 0.5).toFixed(1);
-      const point = { step: stepRef.current, stroke_volume: value };
-      setWaveformData(prev => {
+      const newPoint = {
+        step: stepRef.current,
+        stroke_volume: data.value,
+      };
+    
+      setWaveformData((prev) => {
         const last = prev[prev.length - 1] || {};
-        const merged = { ...last, ...point };
-        const arr = [...prev.slice(0, -1), merged];
-        return arr.length > 60 ? arr.slice(-60) : arr;
+        const combined = { ...last, ...newPoint }; // merge stroke with existing vitals
+        const updated = [...prev.slice(0, -1), combined];
+        return updated.length > 60 ? updated.slice(-60) : updated;
       });
     });
+    
 
-    socket.on("new_signal", data => {
+    socket.on("new_signal", (data) => {
       stepRef.current = +(stepRef.current + 0.5).toFixed(1);
       const enriched = { ...data, step: stepRef.current };
-      setWaveformData(prev => {
-        const arr = [...prev, enriched];
-        return arr.length > 60 ? arr.slice(-60) : arr;
+
+      setWaveformData((prev) => {
+        const updated = [...prev, enriched];
+        return updated.length > 60 ? updated.slice(-60) : updated;
       });
     });
 
@@ -87,158 +100,156 @@ export default function App() {
     setLabelValue(labelOptions[0]);
   }, [labelType]);
 
-  async function handleSimulate() {
-    if (!labelValue) return alert("Select a label");
-    setSimulating(true);
+  const handleSimulate = async () => {
+    if (!labelValue) return alert("❗ Select a valid label");
     try {
+      setSimulating(true);
       await axios.post("http://localhost:5050/simulate", {
         type: labelType,
-        label: labelValue
+        label: labelValue,
       });
-    } catch {
-      alert("Failed to simulate");
+    } catch (err) {
+      console.error(err);
+      alert("❌ Failed to trigger simulation");
       setSimulating(false);
     }
-  }
+  };
 
-  async function handleStop() {
-    setSimulating(false);
+  const handleStop = async () => {
     try {
       await axios.post("http://localhost:5050/stop");
-    } catch {
-      alert("Failed to stop");
+      setSimulating(false);
+    } catch (err) {
+      console.error(err);
+      alert("❌ Failed to stop simulation");
     }
-  }
+  };
 
   return (
-    <div className={darkMode ? "dark" : ""}>
-      <div className="app-container">
-        {/* HEADER */}
-        <header className="header">
-          <h1>LVAD Monitoring</h1>
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="icon-btn"
-            aria-label="Toggle theme"
-            title="Toggle light/dark mode"
-          >
-            {darkMode ? <SunIcon /> : <MoonIcon />}
-          </button>
-        </header>
-
-        {/* CONTROLS */}
-        <section className="controls">
-          <div className="control-group">
-            <label>Type:</label>
-            <select value={labelType} onChange={e => setLabelType(e.target.value)}>
+    <main className="min-h-screen bg-gray-100 p-6 flex flex-col items-center justify-start">
+      <div className="w-full max-w-6xl space-y-4">
+        {/* Controls */}
+        <div className="flex flex-wrap justify-between items-center gap-4">
+          <div className="flex gap-4">
+            <select
+              className="border rounded px-3 py-1"
+              value={labelType}
+              onChange={(e) => setLabelType(e.target.value)}
+            >
               <option value="activity">Activity</option>
               <option value="emotion">Emotion</option>
             </select>
-          </div>
 
-          <div className="control-group">
-            <label>{labelType === "activity" ? "Activity" : "Emotion"}:</label>
-            <select value={labelValue} onChange={e => setLabelValue(e.target.value)}>
-              {labelOptions.map(opt => (
-                <option key={opt} value={opt}>{opt.replace("_", " ")}</option>
+            <select
+              className="border rounded px-3 py-1"
+              value={labelValue}
+              onChange={(e) => setLabelValue(e.target.value)}
+            >
+              {labelOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt.charAt(0).toUpperCase() + opt.slice(1).replace("_", " ")}
+                </option>
               ))}
             </select>
+
+            <button
+              onClick={handleSimulate}
+              className="bg-blue-600 text-white px-4 py-1 rounded hover:bg-blue-700 disabled:opacity-50"
+              disabled={simulating}
+            >
+              {simulating ? "⏳ Simulating..." : "🚀 Simulate"}
+            </button>
+
+            <button
+              onClick={handleStop}
+              className="bg-red-500 text-white px-4 py-1 rounded hover:bg-red-600 disabled:opacity-50"
+              disabled={!simulating}
+            >
+              🛑 Stop
+            </button>
           </div>
 
-          <button onClick={handleSimulate} disabled={simulating} className="main-btn">
-            <PlayIcon /> {simulating ? "Simulating..." : "Simulate"}
-          </button>
+          <div className={`font-semibold text-lg ${connected ? "text-green-600" : "text-red-600"}`}>
+            {connected ? "🟢 Connected" : "🔴 Not connected"}
+          </div>
+        </div>
 
-          <button onClick={handleStop} disabled={!simulating} className="main-btn stop">
-            <StopIcon /> Stop
-          </button>
-
-          <button onClick={() => setShowTable(!showTable)} className="main-btn toggle">
-            {showTable ? "📈 Show Chart" : "📋 Show Table"}
-          </button>
-
-          <span className={`status ${connected ? "online" : "offline"}`}>
-            {connected ? "Connected" : "Disconnected"}
+        {/* Prediction display */}
+        <div className="text-center text-xl font-semibold bg-white rounded shadow p-4">
+          🔹 Latest Stroke Volume:{" "}
+          <span className="text-blue-600">
+            {latestPrediction !== null ? `${latestPrediction} mL` : "Waiting..."}
           </span>
-        </section>
+        </div>
 
-        {/* STROKE VOLUME */}
-        <section className="stroke-vol lvad-section">
-          <div className="lvad-content">
-            <div className="lvad-image">
-              <img src={LVADImage} alt="LVAD" />
-            </div>
-            <div className="lvad-info">
-              <h2>Stroke Volume</h2>
-              <p>Real-time Monitoring</p>
-              <div className="sv-value">
-                {latestPrediction?.toFixed(2) ?? "--"}<span>mL/beat</span>
-              </div>
-              <span className={`sv-status ${latestPrediction != null ? "active" : "inactive"}`}>
-                {latestPrediction != null ? "Active" : "Inactive"}
-              </span>
-            </div>
-          </div>
-        </section>
+        {/* Combined Waveform */}
+        <div className="bg-white rounded shadow p-4">
+          <h2 className="text-lg font-medium mb-2">📉 Combined Vitals</h2>
+          <LineChart
+            width={1100}
+            height={280}
+            data={waveformData}
+            margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis
+              dataKey="step"
+              type="number"
+              domain={[Math.max(0, stepRef.current - 30), stepRef.current]}
+              tickFormatter={(tick) => `${tick.toFixed(1)}s`}
+              label={{ value: "Time (s)", position: "insideBottom", offset: -4 }}
+            />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {signals.map((s, i) => (
+              <Line
+                key={s}
+                type="monotone"
+                dataKey={s}
+                stroke={signalColors[i]}
+                name={signalNames[s]}
+                dot={false}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </div>
 
-        {/* VITALS OVERVIEW */}
-        <section className="overview">
-          <h2>Vitals Overview</h2>
-          {showTable ? (
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Time (s)</th>
-                    {signals.map(s => (
-                      <th key={s}>{signalNames[s]}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {waveformData.map((row, i) => (
-                    <tr key={i}>
-                      <td>{row.step.toFixed(1)}</td>
-                      {signals.map(s => (
-                        <td key={s}>
-                          {row[s] != null ? row[s].toFixed(2) : "--"}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={waveformData}>
+        {/* Individual Signals */}
+        <div className="grid grid-cols-2 gap-4 mt-4">
+          {signals.map((s, i) => (
+            <div key={s} className="bg-white rounded shadow p-2">
+              <h3 className="text-sm font-medium mb-1">{signalNames[s]}</h3>
+              <LineChart
+                width={500}
+                height={150}
+                data={waveformData}
+                margin={{ top: 5, right: 10, left: 5, bottom: 5 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis
                   dataKey="step"
                   type="number"
                   domain={[Math.max(0, stepRef.current - 30), stepRef.current]}
-                  tickFormatter={t => `${t.toFixed(1)}s`}
+                  tickFormatter={(tick) => `${tick.toFixed(1)}s`}
                 />
                 <YAxis />
                 <Tooltip />
-                <Legend />
-                {signals.map((s, i) => (
-                  <Line
-                    key={s}
-                    type="monotone"
-                    dataKey={s}
-                    stroke={signalColors[i]}
-                    name={signalNames[s]}
-                    dot={false}
-                    isAnimationActive={false}
-                    strokeWidth={2}
-                  />
-                ))}
+                <Line
+                  type="monotone"
+                  dataKey={s}
+                  stroke={signalColors[i]}
+                  dot={false}
+                  isAnimationActive={false}
+                />
               </LineChart>
-            </ResponsiveContainer>
-          )}
-        </section>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </main>
   );
 }
+
+export default App;
